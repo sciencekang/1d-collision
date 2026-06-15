@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>교육용 1차원 완전탄성충돌 시뮬레이션</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; background-color: #f8f9fa; margin: 0; padding: 20px; color: #333; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .controls { display: flex; justify-content: center; gap: 20px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; flex-wrap: wrap; }
+        .input-group { display: flex; flex-direction: column; align-items: center; font-weight: bold; }
+        .input-group input { width: 60px; padding: 5px; text-align: center; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn-play { background: #27ae60; } .btn-play:hover { background: #2ecc71; }
+        .btn-pause { background: #f39c12; } .btn-pause:hover { background: #f1c40f; }
+        .btn-reset { background: #c0392b; } .btn-reset:hover { background: #e74c3c; }
+
+        .dashboard { display: flex; gap: 15px; min-height: 400px; }
+        .pane { flex: 1; background: #fff; border-radius: 8px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+        .pane h3 { text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0; }
+        
+        canvas { width: 100%; height: 200px; background: #eef2f5; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 10px; }
+        
+        /* Bar Charts Styles */
+        .chart-row { margin-bottom: 15px; }
+        .chart-label { display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; margin-bottom: 5px; }
+        .chart-track { display: flex; height: 24px; background: #e0e0e0; border-radius: 12px; overflow: hidden; position: relative; }
+        
+        /* Momentum specific (center zero) */
+        .mom-left { flex: 1; display: flex; justify-content: flex-end; border-right: 2px solid #2c3e50; }
+        .mom-right { flex: 1; display: flex; justify-content: flex-start; }
+        .bar-fill { height: 100%; transition: width 0.1s linear; display: flex; align-items: center; color: white; font-size: 12px; font-weight: bold; overflow: hidden; white-space: nowrap; }
+        .fill-A { background: #e74c3c; }
+        .fill-B { background: #3498db; }
+        .fill-Total { background: #9b59b6; }
+        
+        /* Arrow markers */
+        .arrow-left::before { content: '◀ '; padding-left: 5px; }
+        .arrow-right::after { content: ' ▶'; padding-right: 5px; }
+
+        /* Checklist */
+        .checklist { display: none; margin-top: auto; background: #fdfefe; border: 2px dashed #2ecc71; padding: 15px; border-radius: 8px; }
+        .checklist ul { list-style: none; padding: 0; margin: 0; font-weight: bold; line-height: 1.6; }
+        .checklist li { color: #27ae60; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h2>1차원 완전탄성충돌 시각화 시뮬레이션</h2>
+</div>
+
+<div class="controls">
+    <div class="input-group">
+        <label>A 질량 (kg)</label><input type="number" id="m1" value="2" min="0.1" step="0.5">
+    </div>
+    <div class="input-group">
+        <label>A 속도 (m/s)</label><input type="number" id="v1" value="4" step="1">
+    </div>
+    <div class="input-group">
+        <label>B 질량 (kg)</label><input type="number" id="m2" value="1" min="0.1" step="0.5">
+    </div>
+    <div class="input-group">
+        <label>B 속도 (m/s)</label><input type="number" id="v2" value="0" step="1">
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 10px;">
+        <button class="btn btn-play" id="btnPlay">▶ 재생</button>
+        <button class="btn btn-pause" id="btnPause">⏸ 정지</button>
+        <button class="btn btn-reset" id="btnReset">🔄 초기화</button>
+    </div>
+</div>
+
+<div class="dashboard">
+    <div class="pane">
+        <h3>1. 충돌 애니메이션</h3>
+        <canvas id="simCanvas" width="500" height="200"></canvas>
+        <div style="text-align: center; font-weight: bold; font-size: 18px; color: #e74c3c; height: 30px;" id="msg-collision"></div>
+        <div id="evaluation" class="checklist">
+            <h4>💡 학습용 자동 판정</h4>
+            <ul>
+                <li>✅ 전체 운동량이 보존되었다.</li>
+                <li>✅ 전체 운동에너지가 보존되었다.</li>
+                <li>✅ 이 충돌은 완전탄성충돌이다.</li>
+                <li>✅ 운동량 보존 법칙을 확인하였다.</li>
+                <li>✅ 역학적 에너지 보존 법칙을 확인하였다.</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="pane">
+        <h3>2. 운동량 (p = mv)</h3>
+        
+        <div class="chart-row">
+            <div class="chart-label"><span>물체 A (🔴)</span><span id="txt-pA">0 kg·m/s</span></div>
+            <div class="chart-track">
+                <div class="mom-left"><div class="bar-fill fill-A arrow-left" id="bar-pA-L" style="width: 0%;"></div></div>
+                <div class="mom-right"><div class="bar-fill fill-A arrow-right" id="bar-pA-R" style="width: 0%;"></div></div>
+            </div>
+        </div>
+        
+        <div class="chart-row">
+            <div class="chart-label"><span>물체 B (🔵)</span><span id="txt-pB">0 kg·m/s</span></div>
+            <div class="chart-track">
+                <div class="mom-left"><div class="bar-fill fill-B arrow-left" id="bar-pB-L" style="width: 0%;"></div></div>
+                <div class="mom-right"><div class="bar-fill fill-B arrow-right" id="bar-pB-R" style="width: 0%;"></div></div>
+            </div>
+        </div>
+
+        <div class="chart-row">
+            <div class="chart-label"><span>전체 운동량</span><span id="txt-pTot">0 kg·m/s</span></div>
+            <div class="chart-track">
+                <div class="mom-left"><div class="bar-fill fill-Total arrow-left" id="bar-pTot-L" style="width: 0%;"></div></div>
+                <div class="mom-right"><div class="bar-fill fill-Total arrow-right" id="bar-pTot-R" style="width: 0%;"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="pane">
+        <h3>3. 운동에너지 (K = ½mv²)</h3>
+        
+        <div class="chart-row">
+            <div class="chart-label"><span>물체 A (🔴)</span><span id="txt-kA">0 J</span></div>
+            <div class="chart-track" style="background: #e0e0e0;">
+                <div class="bar-fill fill-A" id="bar-kA" style="width: 0%; padding-left: 10px;"></div>
+            </div>
+        </div>
+
+        <div class="chart-row">
+            <div class="chart-label"><span>물체 B (🔵)</span><span id="txt-kB">0 J</span></div>
+            <div class="chart-track" style="background: #e0e0e0;">
+                <div class="bar-fill fill-B" id="bar-kB" style="width: 0%; padding-left: 10px;"></div>
+            </div>
+        </div>
+
+        <div class="chart-row">
+            <div class="chart-label"><span>전체 운동에너지</span><span id="txt-kTot">0 J</span></div>
+            <div class="chart-track" style="background: #e0e0e0;">
+                <div class="bar-fill fill-Total" id="bar-kTot" style="width: 0%; padding-left: 10px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let A = { x: 0, y: 100, r: 0, m: 0, v: 0, color: '#e74c3c' };
+    let B = { x: 0, y: 100, r: 0, m: 0, v: 0, color: '#3498db' };
+    
+    let isPlaying = false, hasCollided = false;
+    let animationId, collisionFlash = 0, messageTimer = 0;
+    const dt = 0.016, scale = 30; // 스케일 조정
+    let maxP = 1, maxK = 1; // 그래프 스케일용 최대값
+
+    function updateCharts() {
+        let pA = A.m * A.v;
+        let pB = B.m * B.v;
+        let pTot = pA + pB;
+        
+        let kA = 0.5 * A.m * A.v * A.v;
+        let kB = 0.5 * B.m * B.v * B.v;
+        let kTot = kA + kB;
+
+        // 텍스트 업데이트
+        document.getElementById('txt-pA').innerText = `${pA > 0 ? '+'+pA.toFixed(1) : pA.toFixed(1)} kg·m/s`;
+        document.getElementById('txt-pB').innerText = `${pB > 0 ? '+'+pB.toFixed(1) : pB.toFixed(1)} kg·m/s`;
+        document.getElementById('txt-pTot').innerText = `${pTot > 0 ? '+'+pTot.toFixed(1) : pTot.toFixed(1)} kg·m/s`;
+        
+        document.getElementById('txt-kA').innerText = `${kA.toFixed(1)} J`;
+        document.getElementById('txt-kB').innerText = `${kB.toFixed(1)} J`;
+        document.getElementById('txt-kTot').innerText = `${kTot.toFixed(1)} J`;
+
+        // 운동량 화살표 바 업데이트 (0을 기준으로 좌/우)
+        const updateMomBar = (val, idL, idR) => {
+            let percent = Math.min(Math.abs(val) / maxP * 100, 100);
+            if (val > 0.01) {
+                document.getElementById(idL).style.width = '0%';
+                document.getElementById(idR).style.width = percent + '%';
+            } else if (val < -0.01) {
+                document.getElementById(idL).style.width = percent + '%';
+                document.getElementById(idR).style.width = '0%';
+            } else {
+                document.getElementById(idL).style.width = '0%';
+                document.getElementById(idR).style.width = '0%';
+            }
+        };
+
+        updateMomBar(pA, 'bar-pA-L', 'bar-pA-R');
+        updateMomBar(pB, 'bar-pB-L', 'bar-pB-R');
+        updateMomBar(pTot, 'bar-pTot-L', 'bar-pTot-R');
+
+        // 운동에너지 막대그래프 업데이트
+        document.getElementById('bar-kA').style.width = Math.min((kA / maxK * 100), 100) + '%';
+        document.getElementById('bar-kB').style.width = Math.min((kB / maxK * 100), 100) + '%';
+        document.getElementById('bar-kTot').style.width = Math.min((kTot / maxK * 100), 100) + '%';
+    }
+
+    function initSim() {
+        cancelAnimationFrame(animationId);
+        
+        A.m = parseFloat(document.getElementById('m1').value) || 0.1;
+        A.v = parseFloat(document.getElementById('v1').value) || 0;
+        B.m = parseFloat(document.getElementById('m2').value) || 0.1;
+        B.v = parseFloat(document.getElementById('v2').value) || 0;
+        
+        A.r = 15 + A.m * 5; // 질량에 비례하여 원 크기 설정
+        B.r = 15 + B.m * 5;
+        
+        A.x = 80;
+        B.x = canvas.width - 150;
+        
+        hasCollided = false;
+        collisionFlash = 0;
+        messageTimer = 0;
+        isPlaying = false;
+        document.getElementById('msg-collision').innerText = '';
+        document.getElementById('evaluation').style.display = 'none';
+
+        // 그래프 스케일을 위해 최대 예상값 계산 (화면 렌더링용)
+        let initP_Total = Math.abs(A.m * A.v) + Math.abs(B.m * B.v);
+        maxP = initP_Total * 1.5 || 10;
+        maxK = (0.5 * A.m * A.v * A.v + 0.5 * B.m * B.v * B.v) * 1.2 || 10;
+
+        updateCharts();
+        draw();
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // 레일 그리기
+        ctx.beginPath();
+        ctx.moveTo(0, 100 + Math.max(A.r, B.r));
+        ctx.lineTo(canvas.width, 100 + Math.max(A.r, B.r));
+        ctx.strokeStyle = '#95a5a6';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        // 충돌 시각 효과 (배경 반짝임)
+        if (collisionFlash > 0) {
+            ctx.fillStyle = `rgba(241, 196, 15, ${collisionFlash})`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            collisionFlash -= 0.03;
+            
+            // 충돌 지점 강조 (파동 효과)
+            ctx.beginPath();
+            ctx.arc((A.x + B.x)/2, 100, 50 - collisionFlash*50, 0, Math.PI*2);
+            ctx.strokeStyle = `rgba(231, 76, 60, ${collisionFlash})`;
+            ctx.lineWidth = 5;
+            ctx.stroke();
+        }
+
+        // 메시지 표시 타이머
+        if(messageTimer > 0) {
+            messageTimer--;
+            if(messageTimer === 0) document.getElementById('msg-collision').innerText = '';
+        }
+
+        // 물체 그리기 함수
+        const drawObject = (obj, label) => {
+            ctx.beginPath();
+            ctx.arc(obj.x, 100, obj.r, 0, Math.PI * 2);
+            ctx.fillStyle = obj.color;
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#2c3e50';
+            ctx.stroke();
+            ctx.fillStyle = 'white';
+            ctx.font = '16px bold Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, obj.x, 100);
+            
+            // 속도 벡터 (작은 화살표)
+            if (Math.abs(obj.v) > 0.1) {
+                ctx.beginPath();
+                ctx.moveTo(obj.x, 100 - obj.r - 10);
+                ctx.lineTo(obj.x + obj.v * 5, 100 - obj.r - 10);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        };
+
+        drawObject(A, 'A');
+        drawObject(B, 'B');
+    }
+
+    function update() {
+        if (!isPlaying) return;
+
+        A.x += A.v * dt * scale;
+        B.x += B.v * dt * scale;
+
+        // 충돌 처리 (완전탄성충돌)
+        if (!hasCollided && (B.x - A.x) <= (A.r + B.r) && (A.v > B.v)) {
+            const v1_new = ((A.m - B.m) * A.v + 2 * B.m * B.v) / (A.m + B.m);
+            const v2_new = (2 * A.m * A.v + (B.m - A.m) * B.v) / (A.m + B.m);
+            
+            A.v = v1_new;
+            B.v = v2_new;
+            
+            const overlap = (A.r + B.r) - (B.x - A.x);
+            A.x -= overlap / 2;
+            B.x += overlap / 2;
+
+            hasCollided = true;
+            collisionFlash = 1.0; 
+            
+            // 충돌 메시지 및 평가 항목 출력
+            document.getElementById('msg-collision').innerText = '💥 충돌 발생! 속도 교환 완료';
+            messageTimer = 120; // 약 2초 유지
+            document.getElementById('evaluation').style.display = 'block';
+        }
+
+        updateCharts();
+        draw();
+
+        if (A.x > canvas.width + 100 || A.x < -100) A.v = 0;
+        if (B.x > canvas.width + 100 || B.x < -100) B.v = 0;
+
+        animationId = requestAnimationFrame(update);
+    }
+
+    document.getElementById('btnPlay').addEventListener('click', () => { if (!isPlaying) { isPlaying = true; update(); } });
+    document.getElementById('btnPause').addEventListener('click', () => { isPlaying = false; cancelAnimationFrame(animationId); });
+    document.getElementById('btnReset').addEventListener('click', initSim);
+    document.querySelectorAll('input').forEach(input => input.addEventListener('change', initSim));
+
+    initSim();
+</script>
+</body>
+</html>
